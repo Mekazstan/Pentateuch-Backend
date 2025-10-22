@@ -1,11 +1,16 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   ExploreQueryDto,
   ExploreResponseDto,
   PostSummaryDto,
 } from './dto/explore-query.dto';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class ExploreService {
@@ -17,136 +22,145 @@ export class ExploreService {
     query: ExploreQueryDto,
     userId?: string,
   ): Promise<ExploreResponseDto> {
-    const { page = 1, limit = 10, tags } = query;
-    const skip = (page - 1) * limit;
+    try {
+      const { page = 1, limit = 10, tags } = query;
+      const skip = (page - 1) * limit;
 
-    let userPreferences: string[] = [];
-    if (userId) {
-      const preferences = await this.prisma.userPreference.findUnique({
-        where: { userId },
-        select: { tags: true },
-      });
-      userPreferences = preferences?.tags || [];
-    }
+      this.logger.log(
+        `Fetching recommended content - Page: ${page}, Limit: ${limit}, Tags: ${tags?.join(',') || 'none'}, UserId: ${userId || 'anonymous'}`,
+      );
 
-    const whereClause: any = {
-      published: true,
-      publishedAt: { not: null },
-    };
-
-    // Apply tag filtering
-    if (tags && tags.length > 0) {
-      whereClause.tags = { hasSome: tags };
-    } else if (userPreferences.length > 0) {
-      whereClause.tags = { hasSome: userPreferences };
-    }
-
-    // Use Prisma's aggregation for sorting by engagement
-    const [posts, totalCount] = await Promise.all([
-      this.prisma.post.findMany({
-        where: whereClause,
-        select: {
-          id: true,
-          title: true,
-          content: true,
-          slug: true,
-          tags: true,
-          publishedAt: true,
-          author: {
-            select: { id: true, fullName: true, avatar: true },
-          },
-          _count: {
-            select: { likes: true, comments: true },
-          },
-        },
-        orderBy: [
-          // Sort by engagement score in database
-          { likes: { _count: 'desc' } },
-          { publishedAt: 'desc' },
-        ],
-        skip,
-        take: limit,
-      }),
-      this.prisma.post.count({ where: whereClause }),
-    ]);
-
-    // Remove in-memory sorting - already sorted by DB
-    const transformedPosts: PostSummaryDto[] = posts.map((post) => ({
-      id: post.id,
-      title: post.title,
-      excerpt: this.createExcerpt(post.content),
-      slug: post.slug,
-      tags: post.tags,
-      publishedAt: post.publishedAt!,
-      author: {
-        id: post.author.id,
-        fullName: post.author.fullName,
-        avatar: post.author.avatar || undefined,
-      },
-      stats: {
-        likesCount: post._count.likes,
-        commentsCount: post._count.comments,
-      },
-    }));
-
-    const availableTags = await this.getAvailableTags();
-    const totalPages = Math.ceil(totalCount / limit);
-
-    return {
-      success: true,
-      message: 'Content retrieved successfully',
-      posts: transformedPosts,
-      pagination: {
-        page,
-        limit,
-        total: totalCount,
-        totalPages,
-        hasNext: page < totalPages,
-        hasPrev: page > 1,
-      },
-      availableTags,
-    };
-  }
-
-  private sortPostsByEngagement(
-    posts: any[],
-    hasUserPreferences: boolean,
-  ): any[] {
-    if (hasUserPreferences) {
-      // For personalized content, prioritize recent posts with engagement
-      return posts.sort((a, b) => {
-        const aEngagement = a._count.likes + a._count.comments;
-        const bEngagement = b._count.likes + b._count.comments;
-
-        // If engagement is similar, sort by recency
-        if (Math.abs(aEngagement - bEngagement) < 5) {
-          return (
-            new Date(b.publishedAt).getTime() -
-            new Date(a.publishedAt).getTime()
+      // Load user preferences if authenticated
+      let userPreferences: string[] = [];
+      if (userId) {
+        try {
+          const preferences = await this.prisma.userPreference.findUnique({
+            where: { userId },
+            select: { tags: true },
+          });
+          userPreferences = preferences?.tags || [];
+          this.logger.log(
+            `User preferences loaded: ${userPreferences.join(',')}`,
           );
+        } catch (error) {
+          this.logger.warn(`Failed to load user preferences: ${error.message}`);
         }
+      }
 
-        return bEngagement - aEngagement;
-      });
-    }
-
-    // For general explore, prioritize highly engaged content
-    return posts.sort((a, b) => {
-      const aScore = a._count.likes * 2 + a._count.comments;
-      const bScore = b._count.likes * 2 + b._count.comments;
-
-      if (aScore === bScore) {
-        return (
-          new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
+      // Determine which tags to use for filtering
+      let filterTags: string[] | null = null;
+      if (tags && tags.length > 0) {
+        filterTags = tags;
+        this.logger.log(`Filtering by explicit tags: ${tags.join(',')}`);
+      } else if (userPreferences.length > 0) {
+        filterTags = userPreferences;
+        this.logger.log(
+          `Filtering by user preference tags: ${userPreferences.join(',')}`,
         );
       }
 
-      return bScore - aScore;
-    });
+      this.logger.log('Executing raw SQL query...');
+
+      // Build the WHERE clause based on tags
+      let whereClause = Prisma.sql`WHERE p.published = true AND p."publishedAt" IS NOT NULL`;
+      if (filterTags && filterTags.length > 0) {
+        // Add tag filtering - p.tags && ARRAY['tag1', 'tag2'] checks if arrays have overlap
+        whereClause = Prisma.sql`WHERE p.published = true 
+          AND p."publishedAt" IS NOT NULL 
+          AND p.tags && ${filterTags}::text[]`;
+      }
+
+      // Execute raw SQL query with engagement sorting
+      const posts: any[] = await this.prisma.$queryRaw`
+        SELECT 
+          p.id,
+          p.title,
+          p.content,
+          p.slug,
+          p.tags,
+          p."publishedAt",
+          p."createdAt",
+          json_build_object(
+            'id', u.id,
+            'fullName', u."fullName",
+            'avatar', u.avatar
+          ) as author,
+          COALESCE(COUNT(DISTINCT l.id), 0)::int as "likesCount",
+          COALESCE(COUNT(DISTINCT c.id), 0)::int as "commentsCount",
+          (COALESCE(COUNT(DISTINCT l.id), 0) * 2 + COALESCE(COUNT(DISTINCT c.id), 0)) as engagement_score
+        FROM posts p
+        INNER JOIN users u ON u.id = p."authorId"
+        LEFT JOIN likes l ON l."postId" = p.id
+        LEFT JOIN comments c ON c."postId" = p.id
+        ${whereClause}
+        GROUP BY p.id, u.id, u."fullName", u.avatar
+        ORDER BY engagement_score DESC, p."publishedAt" DESC
+        LIMIT ${limit}
+        OFFSET ${skip}
+      `;
+
+      this.logger.log(`Fetched ${posts.length} posts from raw SQL`);
+
+      // Get total count for pagination
+      const countResult: any[] = await this.prisma.$queryRaw`
+        SELECT COUNT(*)::int as total
+        FROM posts p
+        ${whereClause}
+      `;
+      const totalCount = countResult[0]?.total || 0;
+
+      this.logger.log(`Total count: ${totalCount}`);
+
+      // Transform posts to DTO format
+      const transformedPosts: PostSummaryDto[] = posts.map((post) => ({
+        id: post.id,
+        title: post.title,
+        excerpt: this.createExcerpt(post.content),
+        slug: post.slug,
+        tags: post.tags,
+        publishedAt: new Date(post.publishedAt),
+        author: {
+          id: post.author.id,
+          fullName: post.author.fullName,
+          avatar: post.author.avatar || undefined,
+        },
+        stats: {
+          likesCount: post.likesCount,
+          commentsCount: post.commentsCount,
+        },
+      }));
+
+      // Fetch available tags
+      this.logger.log('Fetching available tags...');
+      const availableTags = await this.getAvailableTags();
+
+      const totalPages = Math.ceil(totalCount / limit);
+
+      this.logger.log('Successfully completed request');
+
+      return {
+        success: true,
+        message: 'Content retrieved successfully',
+        posts: transformedPosts,
+        pagination: {
+          page,
+          limit,
+          total: totalCount,
+          totalPages,
+          hasNext: page < totalPages,
+          hasPrev: page > 1,
+        },
+        availableTags,
+      };
+    } catch (error) {
+      this.logger.error('Error in getRecommendedContent:', error);
+      throw new InternalServerErrorException(
+        'Failed to fetch recommended content',
+      );
+    }
   }
 
   private createExcerpt(content: string): string {
-    // Remove HTML tags if any and create excerpt
     const plainText = content.replace(/<[^>]*>/g, '');
     return plainText.length > 150
       ? plainText.substring(0, 150) + '...'
@@ -155,25 +169,22 @@ export class ExploreService {
 
   private async getAvailableTags(): Promise<string[]> {
     try {
-      // Get unique tags from published posts
       const posts = await this.prisma.post.findMany({
         where: {
           published: true,
-          tags: {
-            isEmpty: false,
+          NOT: {
+            tags: { isEmpty: true },
           },
         },
         select: {
           tags: true,
         },
-        take: 1000, // Limit to prevent performance issues
+        take: 1000,
       });
 
-      // Flatten and get unique tags
       const allTags = posts.flatMap((post) => post.tags);
       const uniqueTags = Array.from(new Set(allTags));
 
-      // Sort by frequency (most used first)
       const tagCounts = uniqueTags.map((tag) => ({
         tag,
         count: allTags.filter((t) => t === tag).length,
@@ -181,11 +192,11 @@ export class ExploreService {
 
       return tagCounts
         .sort((a, b) => b.count - a.count)
-        .slice(0, 20) // Return top 20 tags
+        .slice(0, 20)
         .map((item) => item.tag);
     } catch (error) {
       this.logger.error('Error fetching available tags:', error);
-      return []; // Return empty array on error instead of crashing
+      return [];
     }
   }
 }

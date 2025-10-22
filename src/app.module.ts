@@ -12,7 +12,7 @@ import { SubscriptionModule } from './subscription/subscription.module';
 import { ExploreModule } from './explore/explore.module';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
-import { UploadService } from './upload/upload.service';
+import { FileUploadService } from './upload/upload.service';
 import { UploadModule } from './upload/upload.module';
 @Module({
   imports: [
@@ -40,6 +40,6 @@ import { UploadModule } from './upload/upload.module';
     UploadModule,
   ],
   controllers: [AppController],
-  providers: [AppService, PrismaService, UploadService],
+  providers: [AppService, PrismaService, FileUploadService],
 })
 export class AppModule {}

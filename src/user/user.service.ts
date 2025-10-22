@@ -9,6 +9,7 @@ import {
   UserProfileResponseDto,
   UserPostsResponseDto,
   ProfileUpdateResponseDto,
+  CurrentUserProfileResponseDto,
 } from './dto/users.dto';
 import { Multer } from 'multer';
 import { FileUploadService } from 'src/upload/upload.service';
@@ -57,6 +58,63 @@ export class UsersService {
         bio: user.bio,
         joinedAt: user.createdAt,
         postsCount: user._count.posts,
+      },
+    };
+  }
+
+  async getCurrentUserProfile(
+    userId: string,
+  ): Promise<CurrentUserProfileResponseDto> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        avatar: true,
+        bio: true,
+        createdAt: true,
+        isVerified: true,
+        googleId: true,
+        preferences: {
+          select: {
+            tags: true,
+          },
+        },
+        _count: {
+          select: {
+            posts: { where: { published: true } },
+            comments: true,
+            likes: true,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return {
+      success: true,
+      message: 'Current user profile retrieved successfully',
+      data: {
+        id: user.id,
+        fullName: user.fullName,
+        email: user.email,
+        avatar: user.avatar,
+        bio: user.bio,
+        joinedAt: user.createdAt,
+        isVerified: user.isVerified,
+        hasGoogleAuth: !!user.googleId,
+        preferences: {
+          tags: user.preferences?.tags || [],
+        },
+        stats: {
+          postsCount: user._count.posts,
+          commentsCount: user._count.comments,
+          likesGiven: user._count.likes,
+        },
       },
     };
   }

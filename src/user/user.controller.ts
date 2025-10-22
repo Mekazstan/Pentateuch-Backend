@@ -31,6 +31,7 @@ import {
   UserProfileResponseDto,
   UserPostsResponseDto,
   ProfileUpdateResponseDto,
+  CurrentUserProfileResponseDto,
 } from './dto/users.dto';
 import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -41,6 +42,23 @@ import { SkipThrottle, Throttle } from '@nestjs/throttler';
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
+
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @SkipThrottle()
+  @ApiOperation({ summary: 'Get current user profile' })
+  @ApiResponse({
+    status: 200,
+    description: 'Current user profile retrieved successfully',
+    type: CurrentUserProfileResponseDto,
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getCurrentUser(
+    @CurrentUser() user: any,
+  ): Promise<CurrentUserProfileResponseDto> {
+    return this.usersService.getCurrentUserProfile(user.id);
+  }
 
   @Get(':id')
   @ApiOperation({
@@ -147,6 +165,8 @@ export class UsersController {
   }
 
   @Patch('profile/avatar')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
   @Throttle({ short: { limit: 5, ttl: 3600000 } })
   @UseInterceptors(FileInterceptor('avatar'))
   async updateAvatar(

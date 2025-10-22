@@ -331,3 +331,65 @@ export class UserPostsResponseDto {
   })
   data: UserPostsDataDto;
 }
+
+export class CurrentUserStatsDto {
+  @ApiProperty({ description: 'Number of published posts' })
+  postsCount: number;
+
+  @ApiProperty({ description: 'Number of comments made' })
+  commentsCount: number;
+
+  @ApiProperty({ description: 'Number of likes given' })
+  likesGiven: number;
+}
+
+export class CurrentUserPreferencesDto {
+  @ApiProperty({ description: 'Preferred content tags', type: [String] })
+  tags: string[];
+}
+
+export class CurrentUserDataDto {
+  @ApiProperty({ description: 'User ID' })
+  id: string;
+
+  @ApiProperty({ description: 'Full name' })
+  fullName: string;
+
+  @ApiProperty({ description: 'Email address' })
+  email: string;
+
+  @ApiProperty({ description: 'Avatar URL', nullable: true })
+  avatar: string | null;
+
+  @ApiProperty({ description: 'Bio', nullable: true })
+  bio: string | null;
+
+  @ApiProperty({ description: 'Join date' })
+  joinedAt: Date;
+
+  @ApiProperty({ description: 'Email verified status' })
+  isVerified: boolean;
+
+  @ApiProperty({ description: 'Has Google authentication linked' })
+  hasGoogleAuth: boolean;
+
+  @ApiProperty({
+    description: 'User preferences',
+    type: CurrentUserPreferencesDto,
+  })
+  preferences: CurrentUserPreferencesDto;
+
+  @ApiProperty({ description: 'User statistics', type: CurrentUserStatsDto })
+  stats: CurrentUserStatsDto;
+}
+
+export class CurrentUserProfileResponseDto {
+  @ApiProperty({ description: 'Success status' })
+  success: boolean;
+
+  @ApiProperty({ description: 'Response message' })
+  message: string;
+
+  @ApiProperty({ description: 'Current user data', type: CurrentUserDataDto })
+  data: CurrentUserDataDto;
+}
