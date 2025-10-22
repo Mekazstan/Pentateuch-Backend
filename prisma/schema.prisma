@@ -1,0 +1,129 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  fullName      String
+  password      String?   // null for Google OAuth users
+  googleId      String?   @unique
+  isVerified    Boolean   @default(false)
+  avatar        String?
+  bio           String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  posts         Post[]
+  comments      Comment[]
+  likes         Like[]
+  preferences   UserPreference?
+
+  @@map("users")
+}
+
+model UserPreference {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  tags      String[] // JSON array of preferred tags
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
+}
+
+model Post {
+  id              String    @id @default(cuid())
+  title           String
+  content         String    @db.Text
+  slug            String    @unique
+  featuredImage   String?
+  authorId        String
+  allowComments   Boolean   @default(true)
+  tags            String[]  // JSON array
+  published       Boolean   @default(false)
+  publishedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  author          User      @relation(fields: [authorId], references: [id])
+  comments        Comment[]
+  likes           Like[]
+
+  @@index([authorId])
+  @@index([publishedAt])
+  @@index([tags])
+  @@map("posts")
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  content   String   @db.Text
+  postId    String
+  authorId  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author    User     @relation(fields: [authorId], references: [id])
+
+  @@index([postId])
+  @@index([authorId])
+  @@map("comments")
+}
+
+model Like {
+  id        String   @id @default(cuid())
+  postId    String
+  userId    String
+  createdAt DateTime @default(now())
+  
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+  @@index([postId])
+  @@index([userId])
+  @@map("likes")
+}
+
+model EmailSubscription {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@map("email_subscriptions")
+}
+
+// Authentication-related models
+model EmailVerification {
+  id               String    @id @default(cuid())
+  email            String
+  verificationCode String
+  expiresAt        DateTime
+  verifiedAt       DateTime?
+  createdAt        DateTime  @default(now())
+
+  @@index([email])
+  @@map("email_verifications")
+}
+
+model PasswordReset {
+  id        String    @id @default(cuid())
+  email     String
+  resetCode String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([email])
+  @@map("password_resets")
+}
