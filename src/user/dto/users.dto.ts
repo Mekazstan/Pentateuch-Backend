@@ -260,7 +260,7 @@ export class UserPostDto {
 }
 
 // Reuse pagination DTO from interactions
-export class PaginationDto {
+export class UserPaginationDto {
   @ApiProperty({
     description: 'Current page number',
     example: 1,
@@ -307,9 +307,9 @@ export class UserPostsDataDto {
 
   @ApiProperty({
     description: 'Pagination information',
-    type: () => PaginationDto,
+    type: () => UserPaginationDto,
   })
-  pagination: PaginationDto;
+  pagination: UserPaginationDto;
 }
 
 export class UserPostsResponseDto {

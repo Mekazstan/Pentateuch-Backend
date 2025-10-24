@@ -157,6 +157,9 @@ export class UserResponseDto {
   @ApiProperty({ description: 'User email address' })
   email: string;
 
+  @ApiProperty({ enum: ['USER', 'ADMIN'] })
+  role: string;
+
   @ApiProperty({ description: 'Email verification status' })
   isVerified: boolean;
 

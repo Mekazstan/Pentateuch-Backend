@@ -18,6 +18,10 @@ export class ExploreService {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Get featured/recommended content with random ordering
+   * This replaces the engagement-based sorting with randomization
+   */
   async getRecommendedContent(
     query: ExploreQueryDto,
     userId?: string,
@@ -27,7 +31,7 @@ export class ExploreService {
       const skip = (page - 1) * limit;
 
       this.logger.log(
-        `Fetching recommended content - Page: ${page}, Limit: ${limit}, Tags: ${tags?.join(',') || 'none'}, UserId: ${userId || 'anonymous'}`,
+        `Fetching featured content - Page: ${page}, Limit: ${limit}, Tags: ${tags?.join(',') || 'none'}, UserId: ${userId || 'anonymous'}`,
       );
 
       // Load user preferences if authenticated
@@ -59,18 +63,17 @@ export class ExploreService {
         );
       }
 
-      this.logger.log('Executing raw SQL query...');
+      this.logger.log('Executing query for most liked posts...');
 
       // Build the WHERE clause based on tags
       let whereClause = Prisma.sql`WHERE p.published = true AND p."publishedAt" IS NOT NULL`;
       if (filterTags && filterTags.length > 0) {
-        // Add tag filtering - p.tags && ARRAY['tag1', 'tag2'] checks if arrays have overlap
         whereClause = Prisma.sql`WHERE p.published = true 
           AND p."publishedAt" IS NOT NULL 
           AND p.tags && ${filterTags}::text[]`;
       }
 
-      // Execute raw SQL query with engagement sorting
+      // Execute raw SQL query with most liked ordering for featured content
       const posts: any[] = await this.prisma.$queryRaw`
         SELECT 
           p.id,
@@ -78,6 +81,7 @@ export class ExploreService {
           p.content,
           p.slug,
           p.tags,
+          p."featuredImage",
           p."publishedAt",
           p."createdAt",
           json_build_object(
@@ -87,19 +91,23 @@ export class ExploreService {
           ) as author,
           COALESCE(COUNT(DISTINCT l.id), 0)::int as "likesCount",
           COALESCE(COUNT(DISTINCT c.id), 0)::int as "commentsCount",
-          (COALESCE(COUNT(DISTINCT l.id), 0) * 2 + COALESCE(COUNT(DISTINCT c.id), 0)) as engagement_score
+          EXISTS(
+            SELECT 1 FROM likes 
+            WHERE likes."postId" = p.id 
+            AND likes."userId" = ${userId || null}
+          ) as "isLiked"
         FROM posts p
         INNER JOIN users u ON u.id = p."authorId"
         LEFT JOIN likes l ON l."postId" = p.id
         LEFT JOIN comments c ON c."postId" = p.id
         ${whereClause}
         GROUP BY p.id, u.id, u."fullName", u.avatar
-        ORDER BY engagement_score DESC, p."publishedAt" DESC
+        ORDER BY "likesCount" DESC, p."publishedAt" DESC
         LIMIT ${limit}
         OFFSET ${skip}
       `;
 
-      this.logger.log(`Fetched ${posts.length} posts from raw SQL`);
+      this.logger.log(`Fetched ${posts.length} posts`);
 
       // Get total count for pagination
       const countResult: any[] = await this.prisma.$queryRaw`
@@ -111,13 +119,15 @@ export class ExploreService {
 
       this.logger.log(`Total count: ${totalCount}`);
 
-      // Transform posts to DTO format
+      // Transform posts to DTO format with HTML content preserved
       const transformedPosts: PostSummaryDto[] = posts.map((post) => ({
         id: post.id,
         title: post.title,
-        excerpt: this.createExcerpt(post.content),
+        excerpt: this.createExcerpt(post.content), // Plain text excerpt
+        content: post.content, // Full HTML content
         slug: post.slug,
         tags: post.tags,
+        featuredImage: post.featuredImage || undefined,
         publishedAt: new Date(post.publishedAt),
         author: {
           id: post.author.id,
@@ -128,9 +138,10 @@ export class ExploreService {
           likesCount: post.likesCount,
           commentsCount: post.commentsCount,
         },
+        isLiked: userId ? post.isLiked : undefined,
       }));
 
-      // Fetch available tags
+      // Fetch available tags from user-created posts
       this.logger.log('Fetching available tags...');
       const availableTags = await this.getAvailableTags();
 
@@ -140,7 +151,7 @@ export class ExploreService {
 
       return {
         success: true,
-        message: 'Content retrieved successfully',
+        message: 'Featured content retrieved successfully',
         posts: transformedPosts,
         pagination: {
           page,
@@ -160,6 +171,10 @@ export class ExploreService {
     }
   }
 
+  /**
+   * Creates a plain text excerpt from HTML content
+   * Strips HTML tags for preview purposes
+   */
   private createExcerpt(content: string): string {
     const plainText = content.replace(/<[^>]*>/g, '');
     return plainText.length > 150
@@ -167,6 +182,10 @@ export class ExploreService {
       : plainText;
   }
 
+  /**
+   * Gets available tags from all published posts
+   * Only tags that have been used by users in their posts
+   */
   private async getAvailableTags(): Promise<string[]> {
     try {
       const posts = await this.prisma.post.findMany({

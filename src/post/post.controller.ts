@@ -44,6 +44,7 @@ import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Multer } from 'multer';
 import { SkipThrottle, Throttle } from '@nestjs/throttler';
+import { AdminGuard } from 'src/auth/guards/admin.guard';
 
 @ApiTags('Posts')
 @Controller('posts')
@@ -51,7 +52,7 @@ export class PostsController {
   constructor(private readonly postsService: PostsService) {}
 
   @Get()
-  @UseGuards(OptionalJwtAuthGuard) // Optional auth to show if user liked posts
+  @UseGuards(OptionalJwtAuthGuard)
   @ApiOperation({
     summary: 'Get all posts',
     description:
@@ -104,6 +105,41 @@ export class PostsController {
     return this.postsService.getAllPosts(getPostsDto, user?.id);
   }
 
+  @Get('recent')
+  @UseGuards(OptionalJwtAuthGuard)
+  @SkipThrottle()
+  @ApiOperation({
+    summary: 'Get recent/latest posts',
+    description: 'Retrieve most recently published posts (newest first)',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    description: 'Page number (default: 1)',
+    example: 1,
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    description: 'Posts per page (default: 10)',
+    example: 10,
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Recent posts retrieved successfully',
+    type: PostListResponseDto,
+  })
+  @ApiInternalServerErrorResponse({
+    description: 'Failed to retrieve recent posts',
+  })
+  async getRecentPosts(
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+    @CurrentUser() user?: any,
+  ): Promise<PostListResponseDto> {
+    return this.postsService.getRecentPosts(page || 1, limit || 10, user?.id);
+  }
+
   @Get('tags')
   @SkipThrottle()
   @ApiOperation({
@@ -122,8 +158,34 @@ export class PostsController {
     return this.postsService.getAllTags();
   }
 
+  @Get('search')
+  @UseGuards(OptionalJwtAuthGuard)
+  @SkipThrottle()
+  @ApiOperation({
+    summary: 'Search posts',
+    description: 'Search posts by query string',
+  })
+  @ApiQuery({
+    name: 'q',
+    required: true,
+    description: 'Search query',
+    example: 'faith and hope',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Search results retrieved successfully',
+    type: PostListResponseDto,
+  })
+  async searchPosts(
+    @Query('q') query: string,
+    @Query() paginationDto: GetPostsDto,
+    @CurrentUser() user?: any,
+  ): Promise<PostListResponseDto> {
+    return this.postsService.searchPosts(query, paginationDto, user?.id);
+  }
+
   @Get(':slug')
-  @UseGuards(OptionalJwtAuthGuard) // Optional auth to show if user liked the post
+  @UseGuards(OptionalJwtAuthGuard)
   @ApiOperation({
     summary: 'Get single post by slug',
     description: 'Retrieve a single published post by its URL slug',
@@ -153,7 +215,7 @@ export class PostsController {
   }
 
   @Post()
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, AdminGuard)
   @ApiBearerAuth('access-token')
   @UseInterceptors(FileInterceptor('image'))
   @ApiOperation({
@@ -167,6 +229,9 @@ export class PostsController {
   })
   @ApiUnauthorizedResponse({
     description: 'Authentication required',
+  })
+  @ApiForbiddenResponse({
+    description: 'Admin access required',
   })
   @ApiBadRequestResponse({
     description: 'Invalid input data or duplicate title',
@@ -185,11 +250,11 @@ export class PostsController {
   }
 
   @Patch(':id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, AdminGuard)
   @ApiBearerAuth('access-token')
   @ApiOperation({
-    summary: 'Update post',
-    description: 'Update an existing post (author only)',
+    summary: 'Update post (Admin only)',
+    description: 'Update an existing post - requires admin role',
   })
   @ApiParam({
     name: 'id',
@@ -264,15 +329,5 @@ export class PostsController {
   ): Promise<SimplePostResponseDto> {
     const userId = user.id;
     return this.postsService.deletePost(postId, userId);
-  }
-
-  @Get('search')
-  @SkipThrottle()
-  async searchPosts(
-    @Query('q') query: string,
-    @Query() paginationDto: GetPostsDto,
-    @CurrentUser() user?: any,
-  ): Promise<PostListResponseDto> {
-    return this.postsService.searchPosts(query, paginationDto, user?.id);
   }
 }

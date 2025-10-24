@@ -88,7 +88,7 @@ export class CommentResponseDto {
   data: CommentDataDto;
 }
 
-export class PaginationDto {
+export class PaginationInteractDto {
   @ApiProperty({
     description: 'Current page number',
     example: 1,
@@ -129,9 +129,9 @@ export class CommentsListDataDto {
 
   @ApiProperty({
     description: 'Pagination information',
-    type: PaginationDto,
+    type: PaginationInteractDto,
   })
-  pagination: PaginationDto;
+  pagination: PaginationInteractDto;
 }
 
 export class CommentsListResponseDto {

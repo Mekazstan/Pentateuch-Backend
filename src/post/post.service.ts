@@ -21,6 +21,7 @@ import {
 } from './dto/post.dto';
 import { Multer } from 'multer';
 import { FileUploadService } from 'src/upload/upload.service';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class PostsService {
@@ -107,13 +108,11 @@ export class PostsService {
       const { page = 1, limit = 10, tags, sortBy } = getPostsDto;
       const skip = (page - 1) * limit;
 
-      // Build where clause
       const where: any = {
         published: true,
         AND: [],
       };
 
-      // Add search condition
       if (query && query.trim()) {
         where.AND.push({
           OR: [
@@ -126,28 +125,22 @@ export class PostsService {
         });
       }
 
-      // Add tags filter
       if (tags && tags.length > 0) {
         where.AND.push({
-          tags: {
-            hasSome: tags,
-          },
+          tags: { hasSome: tags },
         });
       }
 
-      // Clean up empty AND array
       if (where.AND.length === 0) {
         delete where.AND;
       }
 
-      // Build orderBy clause
       let orderBy: any = {};
       switch (sortBy) {
         case 'oldest':
           orderBy = { publishedAt: 'asc' };
           break;
         case 'popular':
-          // For now, fallback to newest. Later implement with aggregation
           orderBy = { createdAt: 'desc' };
           break;
         case 'newest':
@@ -156,7 +149,6 @@ export class PostsService {
           break;
       }
 
-      // Get posts with pagination
       const [posts, totalCount] = await Promise.all([
         this.prisma.post.findMany({
           where,
@@ -210,6 +202,72 @@ export class PostsService {
     }
   }
 
+  async getRecentPosts(
+    page = 1,
+    limit = 10,
+    userId?: string,
+  ): Promise<PostListResponseDto> {
+    try {
+      const skip = (page - 1) * limit;
+
+      const where = {
+        published: true,
+        publishedAt: { not: null },
+      };
+
+      const [posts, totalCount] = await Promise.all([
+        this.prisma.post.findMany({
+          where,
+          skip,
+          take: limit,
+          orderBy: { publishedAt: 'desc' }, // Most recent first
+          include: {
+            author: {
+              select: {
+                id: true,
+                fullName: true,
+                avatar: true,
+                bio: true,
+              },
+            },
+            _count: {
+              select: {
+                likes: true,
+                comments: true,
+              },
+            },
+            ...(userId && {
+              likes: {
+                where: { userId },
+                select: { id: true },
+              },
+            }),
+          },
+        }),
+        this.prisma.post.count({ where }),
+      ]);
+
+      const totalPages = Math.ceil(totalCount / limit);
+
+      return {
+        success: true,
+        message: 'Recent posts retrieved successfully',
+        posts: posts.map((post) => this.formatPostResponse(post, userId)),
+        pagination: {
+          page,
+          limit,
+          total: totalCount,
+          totalPages,
+          hasNext: page < totalPages,
+          hasPrev: page > 1,
+        },
+      };
+    } catch (error) {
+      this.logger.error('Get recent posts error:', error);
+      throw new InternalServerErrorException('Failed to retrieve recent posts');
+    }
+  }
+
   async getAllPosts(
     getPostsDto: GetPostsDto,
     userId?: string,
@@ -220,7 +278,7 @@ export class PostsService {
 
       // Build where clause
       const where: any = {
-        published: true, // Only show published posts publicly
+        published: true,
       };
 
       // Add search filter
@@ -245,9 +303,8 @@ export class PostsService {
           orderBy = { publishedAt: 'asc' };
           break;
         case 'popular':
-          // Order by likes count (you might want to add a computed field or use raw query for better performance)
-          orderBy = { createdAt: 'desc' }; // Fallback to newest for now
-          break;
+          // For popular, use raw query with engagement calculation
+          return this.getPopularPosts(getPostsDto, userId);
         case 'newest':
         default:
           orderBy = { publishedAt: 'desc' };
@@ -316,7 +373,7 @@ export class PostsService {
       const post = await this.prisma.post.findUnique({
         where: {
           slug,
-          published: true, // Only allow access to published posts
+          published: true,
         },
         include: {
           author: {
@@ -509,7 +566,6 @@ export class PostsService {
 
   async getAllTags(): Promise<TagsResponseDto> {
     try {
-      // Get all unique tags from published posts
       const posts = await this.prisma.post.findMany({
         where: {
           published: true,
@@ -518,7 +574,6 @@ export class PostsService {
         select: { tags: true },
       });
 
-      // Flatten and deduplicate tags
       const allTags = posts.flatMap((post) => post.tags);
       const uniqueTags = [...new Set(allTags)].sort();
 
@@ -534,6 +589,77 @@ export class PostsService {
   }
 
   // Helper methods
+  private async getPopularPosts(
+    getPostsDto: GetPostsDto,
+    userId?: string,
+  ): Promise<PostListResponseDto> {
+    const { page = 1, limit = 10, search, tags } = getPostsDto;
+    const skip = (page - 1) * limit;
+
+    let whereClause = Prisma.sql`WHERE p.published = true AND p."publishedAt" IS NOT NULL`;
+
+    // Add search filter
+    if (search) {
+      whereClause = Prisma.sql`${whereClause} AND (
+        p.title ILIKE ${'%' + search + '%'} OR 
+        p.content ILIKE ${'%' + search + '%'}
+      )`;
+    }
+
+    // Add tags filter
+    if (tags && tags.length > 0) {
+      whereClause = Prisma.sql`${whereClause} AND p.tags && ${tags}::text[]`;
+    }
+
+    const posts: any[] = await this.prisma.$queryRaw`
+      SELECT 
+        p.id, p.title, p.content, p.slug, p.tags, p."featuredImage",
+        p."publishedAt", p."createdAt", p."updatedAt",
+        p."allowComments", p.published,
+        json_build_object(
+          'id', u.id, 'fullName', u."fullName", 
+          'avatar', u.avatar, 'bio', u.bio
+        ) as author,
+        COALESCE(COUNT(DISTINCT l.id), 0)::int as "likesCount",
+        COALESCE(COUNT(DISTINCT c.id), 0)::int as "commentsCount",
+        (COALESCE(COUNT(DISTINCT l.id), 0) * 2 + COALESCE(COUNT(DISTINCT c.id), 0)) as engagement_score,
+        EXISTS(
+          SELECT 1 FROM likes 
+          WHERE likes."postId" = p.id 
+          AND likes."userId" = ${userId || null}
+        ) as "isLiked"
+      FROM posts p
+      INNER JOIN users u ON u.id = p."authorId"
+      LEFT JOIN likes l ON l."postId" = p.id
+      LEFT JOIN comments c ON c."postId" = p.id
+      ${whereClause}
+      GROUP BY p.id, u.id
+      ORDER BY engagement_score DESC, p."publishedAt" DESC
+      LIMIT ${limit}
+      OFFSET ${skip}
+    `;
+
+    const countResult: any[] = await this.prisma.$queryRaw`
+      SELECT COUNT(*)::int as total FROM posts p ${whereClause}
+    `;
+    const totalCount = countResult[0]?.total || 0;
+    const totalPages = Math.ceil(totalCount / limit);
+
+    return {
+      success: true,
+      message: 'Popular posts retrieved successfully',
+      posts: posts.map((post) => this.formatPostResponseFromRaw(post, userId)),
+      pagination: {
+        page,
+        limit,
+        total: totalCount,
+        totalPages,
+        hasNext: page < totalPages,
+        hasPrev: page > 1,
+      },
+    };
+  }
+
   private generateSlug(title: string): string {
     return title
       .toLowerCase()
@@ -642,7 +768,30 @@ export class PostsService {
       updatedAt: post.updatedAt,
       likesCount: post._count?.likes || 0,
       commentsCount: post._count?.comments || 0,
-      isLiked: userId ? post.likes?.length > 0 : undefined,
+      isLiked: userId ? post.likes?.length > 0 || false : undefined,
+    };
+  }
+
+  private formatPostResponseFromRaw(
+    post: any,
+    userId?: string,
+  ): PostResponseDto {
+    return {
+      id: post.id,
+      title: post.title,
+      content: post.content,
+      slug: post.slug,
+      featuredImage: post.featuredImage || undefined,
+      author: post.author,
+      allowComments: post.allowComments,
+      tags: post.tags,
+      published: post.published,
+      publishedAt: new Date(post.publishedAt),
+      createdAt: new Date(post.createdAt),
+      updatedAt: new Date(post.updatedAt),
+      likesCount: post.likesCount,
+      commentsCount: post.commentsCount,
+      isLiked: userId ? post.isLiked : undefined,
     };
   }
 }

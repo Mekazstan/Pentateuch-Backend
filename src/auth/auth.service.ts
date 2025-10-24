@@ -1,5 +1,4 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
-
 import {
   BadRequestException,
   ConflictException,
@@ -514,7 +513,7 @@ export class AuthService {
     const payload = {
       sub: user.id,
       email: user.email,
-      isVerified: user.isVerified,
+      role: user.role,
     };
 
     const [accessToken, refreshToken] = await Promise.all([
@@ -536,6 +535,7 @@ export class AuthService {
       id: user.id,
       fullName: user.fullName,
       email: user.email,
+      role: user.role,
       isVerified: user.isVerified,
       avatar: user.avatar,
       bio: user.bio,

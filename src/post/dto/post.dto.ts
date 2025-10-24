@@ -1,38 +1,60 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsString,
-  IsNotEmpty,
   IsBoolean,
   IsOptional,
   IsArray,
-  IsInt,
   Min,
   Max,
+  MaxLength,
+  MinLength,
+  IsNumber,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
-import { Sanitize } from '../../common/decorators/sanitize.decorator';
+
+export class AuthorDto {
+  @ApiProperty({ example: 'clxxxxxxxxxxxxxx' })
+  id: string;
+
+  @ApiProperty({ example: 'John Doe' })
+  fullName: string;
+
+  @ApiPropertyOptional({ example: 'https://example.com/avatar.jpg' })
+  avatar?: string;
+
+  @ApiPropertyOptional({ example: 'Faith blogger and writer' })
+  bio?: string;
+}
 
 export class CreatePostDto {
   @ApiProperty({
     description: 'Post title',
-    example: 'Walking in Faith: A Journey of Trust',
+    example: 'A Love Letter To Abba',
+    minLength: 3,
+    maxLength: 200,
   })
-  @Sanitize()
   @IsString()
-  @IsNotEmpty()
+  @MinLength(3)
+  @MaxLength(200)
   title: string;
 
   @ApiProperty({
-    description: 'Post content in markdown or plain text',
-    example: 'In times of uncertainty, faith becomes our anchor...',
+    description: 'Post content in HTML format',
+    example: '<p>I thought I was alone...</p><p>Until I met You.</p>',
   })
-  @Sanitize()
   @IsString()
-  @IsNotEmpty()
   content: string;
 
   @ApiPropertyOptional({
-    description: 'Whether to allow comments on this post',
+    description: 'Featured image URL',
+    example: 'https://example.com/image.jpg',
+  })
+  @IsOptional()
+  @IsString()
+  featuredImageFile?: string;
+
+  @ApiPropertyOptional({
+    description: 'Allow comments on this post',
     example: true,
     default: true,
   })
@@ -41,8 +63,8 @@ export class CreatePostDto {
   allowComments?: boolean;
 
   @ApiPropertyOptional({
-    description: 'Tags for content categorization',
-    example: ['faith', 'prayer', 'devotion', 'testimony'],
+    description: 'Post tags for categorization',
+    example: ['faith', 'love', 'prayer'],
     type: [String],
   })
   @IsOptional()
@@ -51,53 +73,50 @@ export class CreatePostDto {
   tags?: string[];
 
   @ApiPropertyOptional({
-    description: 'Whether to publish immediately or save as draft',
+    description: 'Publish immediately',
     example: true,
     default: false,
   })
   @IsOptional()
   @IsBoolean()
   published?: boolean;
-
-  @ApiPropertyOptional({
-    type: 'string',
-    format: 'binary',
-    description: 'Featured image file',
-  })
-  @IsOptional()
-  featuredImageFile?: any;
 }
 
 export class UpdatePostDto {
   @ApiPropertyOptional({
     description: 'Post title',
-    example: 'Walking in Faith: A Journey of Trust (Updated)',
+    example: 'Updated Title',
   })
   @IsOptional()
   @IsString()
-  @IsNotEmpty()
+  @MinLength(3)
+  @MaxLength(200)
   title?: string;
 
   @ApiPropertyOptional({
-    description: 'Post content',
-    example: 'Updated content...',
+    description: 'Post content in HTML format',
+    example: '<p>Updated content...</p>',
   })
   @IsOptional()
   @IsString()
-  @IsNotEmpty()
   content?: string;
 
   @ApiPropertyOptional({
-    description: 'Whether to allow comments on this post',
-    example: false,
+    description: 'Featured image URL',
+  })
+  @IsOptional()
+  @IsString()
+  featuredImageFile?: string;
+
+  @ApiPropertyOptional({
+    description: 'Allow comments on this post',
   })
   @IsOptional()
   @IsBoolean()
   allowComments?: boolean;
 
   @ApiPropertyOptional({
-    description: 'Tags for content categorization',
-    example: ['faith', 'prayer', 'updated'],
+    description: 'Post tags',
     type: [String],
   })
   @IsOptional()
@@ -106,8 +125,7 @@ export class UpdatePostDto {
   tags?: string[];
 
   @ApiPropertyOptional({
-    description: 'Publication status',
-    example: true,
+    description: 'Publish status',
   })
   @IsOptional()
   @IsBoolean()
@@ -116,32 +134,32 @@ export class UpdatePostDto {
 
 export class GetPostsDto {
   @ApiPropertyOptional({
-    description: 'Page number (1-based)',
+    description: 'Page number',
     example: 1,
-    minimum: 1,
+    default: 1,
   })
   @IsOptional()
   @Type(() => Number)
-  @IsInt()
+  @IsNumber()
   @Min(1)
-  page: number = 1;
+  page?: number;
 
   @ApiPropertyOptional({
-    description: 'Number of posts per page',
+    description: 'Items per page',
     example: 10,
-    minimum: 1,
+    default: 10,
     maximum: 50,
   })
   @IsOptional()
   @Type(() => Number)
-  @IsInt()
+  @IsNumber()
   @Min(1)
   @Max(50)
-  limit: number = 10;
+  limit?: number;
 
   @ApiPropertyOptional({
-    description: 'Search query for title and content',
-    example: 'faith prayer',
+    description: 'Search query',
+    example: 'faith and hope',
   })
   @IsOptional()
   @IsString()
@@ -149,23 +167,27 @@ export class GetPostsDto {
 
   @ApiPropertyOptional({
     description: 'Filter by tags (comma-separated)',
-    example: 'faith,prayer,devotion',
+    example: 'faith,prayer,love',
   })
   @IsOptional()
-  @IsString()
   @Transform(({ value }) =>
-    value ? value.split(',').map((tag: string) => tag.trim()) : undefined,
+    typeof value === 'string'
+      ? value.split(',').map((tag) => tag.trim())
+      : value,
   )
+  @IsArray()
+  @IsString({ each: true })
   tags?: string[];
 
   @ApiPropertyOptional({
     description: 'Sort order',
-    example: 'newest',
     enum: ['newest', 'oldest', 'popular'],
+    example: 'newest',
+    default: 'newest',
   })
   @IsOptional()
   @IsString()
-  sortBy?: 'newest' | 'oldest' | 'popular' = 'newest';
+  sortBy?: 'newest' | 'oldest' | 'popular';
 }
 
 export class AuthorResponseDto {
@@ -183,116 +205,134 @@ export class AuthorResponseDto {
 }
 
 export class PostResponseDto {
-  @ApiProperty({ description: 'Post ID' })
+  @ApiProperty({ example: 'clxxxxxxxxxxxxxx' })
   id: string;
 
-  @ApiProperty({ description: 'Post title' })
+  @ApiProperty({ example: 'A Love Letter To Abba' })
   title: string;
 
-  @ApiProperty({ description: 'Post content' })
+  @ApiProperty({
+    description: 'Full HTML content of the post',
+    example: '<p>I thought I was alone...</p><p>Until I met You.</p>',
+  })
   content: string;
 
-  @ApiProperty({ description: 'Post URL slug' })
+  @ApiProperty({ example: 'a-love-letter-to-abba' })
   slug: string;
 
-  @ApiProperty({ description: 'Author information', type: AuthorResponseDto })
-  author: AuthorResponseDto;
+  @ApiPropertyOptional({ example: 'https://example.com/featured.jpg' })
+  featuredImage?: string;
 
-  @ApiProperty({ description: 'Whether comments are allowed' })
+  @ApiProperty({ type: AuthorDto })
+  author: AuthorDto;
+
+  @ApiProperty({ example: true })
   allowComments: boolean;
 
-  @ApiProperty({ description: 'Post tags', type: [String] })
+  @ApiProperty({ example: ['faith', 'love', 'prayer'], type: [String] })
   tags: string[];
 
-  @ApiProperty({ description: 'Publication status' })
+  @ApiProperty({ example: true })
   published: boolean;
 
-  @ApiProperty({ description: 'Publication date', required: false })
-  publishedAt?: Date;
+  @ApiProperty({ example: '2024-10-24T10:00:00Z' })
+  publishedAt: Date;
 
-  @ApiProperty({ description: 'Creation date' })
+  @ApiProperty({ example: '2024-10-24T09:00:00Z' })
   createdAt: Date;
 
-  @ApiProperty({ description: 'Last update date' })
+  @ApiProperty({ example: '2024-10-24T11:00:00Z' })
   updatedAt: Date;
 
-  @ApiProperty({ description: 'Number of likes' })
+  @ApiProperty({ example: 42 })
   likesCount: number;
 
-  @ApiProperty({ description: 'Number of comments' })
+  @ApiProperty({ example: 15 })
   commentsCount: number;
 
-  @ApiProperty({
-    description: 'Whether current user liked this post',
-    required: false,
+  @ApiPropertyOptional({
+    description:
+      'Whether the current user has liked this post (only for authenticated users)',
+    example: true,
   })
   isLiked?: boolean;
+}
 
-  @ApiProperty({
-    description: 'Featured image URL',
-    nullable: true,
-  })
-  featuredImage?: string | null;
+export class PaginationDto {
+  @ApiProperty({ example: 1 })
+  page: number;
+
+  @ApiProperty({ example: 10 })
+  limit: number;
+
+  @ApiProperty({ example: 100 })
+  total: number;
+
+  @ApiProperty({ example: 10 })
+  totalPages: number;
+
+  @ApiProperty({ example: true })
+  hasNext: boolean;
+
+  @ApiProperty({ example: false })
+  hasPrev: boolean;
 }
 
 export class PostListResponseDto {
-  @ApiProperty({ description: 'Success status' })
+  @ApiProperty({ example: true })
   success: boolean;
 
-  @ApiProperty({ description: 'Response message' })
+  @ApiProperty({ example: 'Posts retrieved successfully' })
   message: string;
 
-  @ApiProperty({ description: 'List of posts', type: [PostResponseDto] })
+  @ApiProperty({ type: [PostResponseDto] })
   posts: PostResponseDto[];
 
-  @ApiProperty({ description: 'Pagination metadata' })
-  pagination: {
-    page: number;
-    limit: number;
-    total: number;
-    totalPages: number;
-    hasNext: boolean;
-    hasPrev: boolean;
-  };
+  @ApiProperty({ type: PaginationDto })
+  pagination: PaginationDto;
 }
 
 export class SinglePostResponseDto {
-  @ApiProperty({ description: 'Success status' })
+  @ApiProperty({ example: true })
   success: boolean;
 
-  @ApiProperty({ description: 'Response message' })
+  @ApiProperty({ example: 'Post retrieved successfully' })
   message: string;
 
-  @ApiProperty({ description: 'Post data', type: PostResponseDto })
+  @ApiProperty({ type: PostResponseDto })
   post: PostResponseDto;
 }
 
 export class PostCreatedResponseDto {
-  @ApiProperty({ description: 'Success status' })
+  @ApiProperty({ example: true })
   success: boolean;
 
-  @ApiProperty({ description: 'Response message' })
+  @ApiProperty({ example: 'Post created successfully' })
   message: string;
 
-  @ApiProperty({ description: 'Created post data', type: PostResponseDto })
+  @ApiProperty({ type: PostResponseDto })
   post: PostResponseDto;
 }
 
 export class TagsResponseDto {
-  @ApiProperty({ description: 'Success status' })
+  @ApiProperty({ example: true })
   success: boolean;
 
-  @ApiProperty({ description: 'Response message' })
+  @ApiProperty({ example: 'Tags retrieved successfully' })
   message: string;
 
-  @ApiProperty({ description: 'List of available tags', type: [String] })
+  @ApiProperty({
+    description: 'All available tags from user-created posts',
+    example: ['faith', 'prayer', 'love', 'hope'],
+    type: [String],
+  })
   tags: string[];
 }
 
 export class SimplePostResponseDto {
-  @ApiProperty({ description: 'Success status' })
+  @ApiProperty({ example: true })
   success: boolean;
 
-  @ApiProperty({ description: 'Response message' })
+  @ApiProperty({ example: 'Post deleted successfully' })
   message: string;
 }

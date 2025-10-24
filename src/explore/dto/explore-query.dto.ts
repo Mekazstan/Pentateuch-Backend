@@ -1,119 +1,123 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsOptional,
-  IsInt,
   Min,
   Max,
   IsArray,
   IsString,
+  IsNumber,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
+import { AuthorDto, PaginationDto } from 'src/post/dto/post.dto';
 
 export class ExploreQueryDto {
-  @ApiProperty({
+  @ApiPropertyOptional({
     description: 'Page number',
     example: 1,
     default: 1,
-    required: false,
   })
   @IsOptional()
   @Type(() => Number)
-  @IsInt()
+  @IsNumber()
   @Min(1)
-  page?: number = 1;
+  page?: number;
 
-  @ApiProperty({
-    description: 'Number of items per page',
+  @ApiPropertyOptional({
+    description: 'Items per page',
     example: 10,
     default: 10,
-    required: false,
-    minimum: 1,
     maximum: 50,
   })
   @IsOptional()
   @Type(() => Number)
-  @IsInt()
+  @IsNumber()
   @Min(1)
   @Max(50)
-  limit?: number = 10;
+  limit?: number;
 
-  @ApiProperty({
-    description: 'Filter by specific tags',
-    example: ['faith', 'prayer'],
-    required: false,
-    type: [String],
+  @ApiPropertyOptional({
+    description: 'Filter by tags (comma-separated)',
+    example: 'faith,prayer,devotion',
   })
   @IsOptional()
-  @Transform(({ value }) => {
-    if (typeof value === 'string') {
-      return value.split(',').map((tag) => tag.trim());
-    }
-    return value;
-  })
+  @Transform(({ value }) =>
+    typeof value === 'string'
+      ? value.split(',').map((tag) => tag.trim())
+      : value,
+  )
   @IsArray()
   @IsString({ each: true })
   tags?: string[];
 }
 
-// explore/dto/explore-response.dto.ts
+export class PostStatsDto {
+  @ApiProperty({ example: 42 })
+  likesCount: number;
+
+  @ApiProperty({ example: 15 })
+  commentsCount: number;
+}
+
 export class PostSummaryDto {
-  @ApiProperty({ description: 'Post ID' })
+  @ApiProperty({ example: 'clxxxxxxxxxxxxxx' })
   id: string;
 
-  @ApiProperty({ description: 'Post title' })
+  @ApiProperty({ example: 'A Love Letter To Abba' })
   title: string;
 
-  @ApiProperty({ description: 'Post content excerpt' })
+  @ApiProperty({
+    description: 'Plain text excerpt (first 150 characters)',
+    example: 'I thought I was alone. I thought I was neglected...',
+  })
   excerpt: string;
 
-  @ApiProperty({ description: 'Post slug for URL' })
+  @ApiPropertyOptional({
+    description: 'Full HTML content of the post',
+    example: '<p>I thought I was alone...</p>',
+  })
+  content?: string;
+
+  @ApiProperty({ example: 'a-love-letter-to-abba' })
   slug: string;
 
-  @ApiProperty({ description: 'Post tags' })
+  @ApiProperty({ example: ['faith', 'love'], type: [String] })
   tags: string[];
 
-  @ApiProperty({ description: 'Publication date' })
+  @ApiPropertyOptional({ example: 'https://example.com/featured.jpg' })
+  featuredImage?: string;
+
+  @ApiProperty({ example: '2024-10-24T10:00:00Z' })
   publishedAt: Date;
 
-  @ApiProperty({ description: 'Author information' })
-  author: {
-    id: string;
-    fullName: string;
-    avatar?: string;
-  };
+  @ApiProperty({ type: AuthorDto })
+  author: AuthorDto;
 
-  @ApiProperty({ description: 'Engagement metrics' })
-  stats: {
-    likesCount: number;
-    commentsCount: number;
-  };
+  @ApiProperty({ type: PostStatsDto })
+  stats: PostStatsDto;
+
+  @ApiPropertyOptional({
+    description: 'Whether the current user has liked this post',
+    example: true,
+  })
+  isLiked?: boolean;
 }
 
 export class ExploreResponseDto {
-  @ApiProperty({ description: 'Success status' })
+  @ApiProperty({ example: true })
   success: boolean;
 
-  @ApiProperty({ description: 'Response message' })
+  @ApiProperty({ example: 'Featured content retrieved successfully' })
   message: string;
 
-  @ApiProperty({
-    description: 'List of recommended posts',
-    type: [PostSummaryDto],
-  })
+  @ApiProperty({ type: [PostSummaryDto] })
   posts: PostSummaryDto[];
 
-  @ApiProperty({ description: 'Pagination metadata' })
-  pagination: {
-    page: number;
-    limit: number;
-    total: number;
-    totalPages: number;
-    hasNext: boolean;
-    hasPrev: boolean;
-  };
+  @ApiProperty({ type: PaginationDto })
+  pagination: PaginationDto;
 
   @ApiProperty({
     description: 'Available tags for filtering',
+    example: ['faith', 'prayer', 'love'],
     type: [String],
   })
   availableTags: string[];
