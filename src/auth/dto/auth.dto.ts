@@ -48,14 +48,14 @@ export class RegisterDto {
 
 export class VerifyEmailDto {
   @ApiProperty({
-    description: '6-digit verification code sent to your email',
-    example: '123456',
-    minLength: 6,
-    maxLength: 6,
+    description: '4-digit verification code sent to your email',
+    example: '1234',
+    minLength: 4,
+    maxLength: 4,
   })
   @IsString()
   @IsNotEmpty()
-  @Length(6, 6)
+  @Length(4, 4)
   verificationCode: string;
 }
 

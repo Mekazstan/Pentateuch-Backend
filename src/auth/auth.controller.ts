@@ -57,7 +57,7 @@ export class AuthController {
   @ApiOperation({
     summary: 'Verify email with code',
     description:
-      'Verify your email address using the 6-digit code sent to your email',
+      'Verify your email address using the 4-digit code sent to your email',
   })
   @ApiResponse({
     status: HttpStatus.OK,
