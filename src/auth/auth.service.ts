@@ -1,3 +1,4 @@
+/* eslint-disable no-constant-condition */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import {
   BadRequestException,
@@ -128,10 +129,9 @@ export class AuthService {
   async verifyEmail(verifyEmailDto: VerifyEmailDto): Promise<AuthResponseDto> {
     try {
       const result = await this.prisma.$transaction(async (tx) => {
-        // Find the most recent verification code for this email
+        // Find verification by code ONLY (not email)
         const verification = await tx.emailVerification.findFirst({
           where: {
-            email: verifyEmailDto.email.toLowerCase(),
             verificationCode: verifyEmailDto.verificationCode,
             verifiedAt: null,
             expiresAt: {
@@ -147,9 +147,12 @@ export class AuthService {
           throw new BadRequestException('Invalid or expired verification code');
         }
 
-        // Get user
+        // Get user by email from the verification record
         const user = await tx.user.findUnique({
-          where: { email: verifyEmailDto.email.toLowerCase() },
+          where: { email: verification.email },
+          include: {
+            preferences: true,
+          },
         });
 
         if (!user) {
@@ -164,6 +167,9 @@ export class AuthService {
         const updatedUser = await tx.user.update({
           where: { id: user.id },
           data: { isVerified: true },
+          include: {
+            preferences: true,
+          },
         });
 
         // Mark verification as used
@@ -178,9 +184,17 @@ export class AuthService {
       // Generate new tokens
       const tokens = await this.generateTokens(result);
 
+      // Send welcome email after successful verification
+      try {
+        await this.emailService.sendWelcomeMessage(result);
+      } catch (emailError) {
+        // Don't fail verification if welcome email fails
+        this.logger.warn('Failed to send welcome email:', emailError.message);
+      }
+
       return {
         success: true,
-        message: 'Email verified successfully',
+        message: 'Email verified successfully! Welcome to Pentateuch.',
         user: this.formatUserResponse(result),
         token: tokens.accessToken,
         refreshToken: tokens.refreshToken,
@@ -397,38 +411,40 @@ export class AuthService {
     forgotPasswordDto: ForgotPasswordDto,
   ): Promise<SimpleResponseDto> {
     try {
+      const email = forgotPasswordDto.email.toLowerCase();
+
       const user = await this.prisma.user.findUnique({
-        where: { email: forgotPasswordDto.email.toLowerCase() },
+        where: { email },
       });
 
-      // Don't reveal if user exists or not for security
-      if (user && user.password) {
-        // Only send reset code if user has a password (not Google OAuth user)
-        const resetCode = this.generateResetCode();
-        const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
-
-        // Store reset code in database
-        await this.prisma.passwordReset.create({
-          data: {
-            email: user.email,
-            resetCode,
-            expiresAt,
-          },
-        });
-
-        // Send email
-        await this.emailService.sendPasswordResetEmail(user.email, resetCode);
+      if (!user) {
+        return {
+          success: true,
+          message: 'If the email exists, a reset code has been sent.',
+        };
       }
+
+      // Generate unique 6-digit code
+      const resetCode = await this.generateUniqueResetCode();
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+
+      await this.prisma.passwordReset.create({
+        data: {
+          email,
+          resetCode,
+          expiresAt,
+        },
+      });
+
+      await this.emailService.sendPasswordResetEmail(email, resetCode);
 
       return {
         success: true,
-        message:
-          'If an account exists with this email, a password reset code has been sent',
-        expiresIn: 900, // 15 minutes
+        message: 'If the email exists, a reset code has been sent.',
       };
     } catch (error) {
       this.logger.error('Forgot password error:', error);
-      throw new InternalServerErrorException('Failed to send reset code');
+      throw new InternalServerErrorException('Failed to process request');
     }
   }
 
@@ -437,10 +453,9 @@ export class AuthService {
   ): Promise<SimpleResponseDto> {
     try {
       const result = await this.prisma.$transaction(async (tx) => {
-        // Find valid reset code
+        // Find valid reset code by code ONLY (not email)
         const passwordReset = await tx.passwordReset.findFirst({
           where: {
-            email: resetPasswordDto.email.toLowerCase(),
             resetCode: resetPasswordDto.resetCode,
             usedAt: null,
             expiresAt: {
@@ -456,9 +471,9 @@ export class AuthService {
           throw new BadRequestException('Invalid or expired reset code');
         }
 
-        // Find user
+        // Get user by email from the password reset record
         const user = await tx.user.findUnique({
-          where: { email: resetPasswordDto.email.toLowerCase() },
+          where: { email: passwordReset.email },
         });
 
         if (!user) {
@@ -489,7 +504,8 @@ export class AuthService {
 
       return {
         success: true,
-        message: 'Password reset successfully',
+        message:
+          'Password reset successfully. You can now log in with your new password.',
       };
     } catch (error) {
       this.logger.error('Reset password error:', error);
@@ -553,9 +569,7 @@ export class AuthService {
 
   private async sendVerificationEmail(email: string): Promise<void> {
     // Generate 4-digit verification code
-    const verificationCode = Math.floor(
-      100000 + Math.random() * 900000,
-    ).toString();
+    const verificationCode = await this.generateUniqueVerificationCode();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
     // Store verification code in database
@@ -571,9 +585,58 @@ export class AuthService {
     await this.emailService.sendEmailVerificationCode(email, verificationCode);
   }
 
-  private generateResetCode(): string {
-    // Generate 6-digit reset code
-    return Math.floor(100000 + Math.random() * 900000).toString();
+  private async generateUniqueResetCode(): Promise<string> {
+    let code: string;
+    let attempts = 0;
+    const maxAttempts = 10;
+
+    do {
+      code = Math.floor(100000 + Math.random() * 900000).toString();
+
+      const existing = await this.prisma.passwordReset.findFirst({
+        where: {
+          resetCode: code,
+          usedAt: null,
+          expiresAt: { gte: new Date() },
+        },
+      });
+
+      if (!existing) break;
+
+      attempts++;
+      if (attempts >= maxAttempts) {
+        throw new Error('Failed to generate unique reset code');
+      }
+    } while (true);
+
+    return code;
+  }
+
+  private async generateUniqueVerificationCode(): Promise<string> {
+    let code: string;
+    let attempts = 0;
+    const maxAttempts = 10;
+
+    do {
+      code = Math.floor(100000 + Math.random() * 900000).toString();
+
+      const existing = await this.prisma.emailVerification.findFirst({
+        where: {
+          verificationCode: code,
+          verifiedAt: null,
+          expiresAt: { gte: new Date() },
+        },
+      });
+
+      if (!existing) break;
+
+      attempts++;
+      if (attempts >= maxAttempts) {
+        throw new Error('Failed to generate unique verification code');
+      }
+    } while (true);
+
+    return code;
   }
 
   private async verifyGoogleToken(

@@ -1,85 +1,49 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument */
+/* eslint-disable @typescript-eslint/no-floating-promises */
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Resend } from 'resend';
+import * as nodemailer from 'nodemailer';
+import { Transporter } from 'nodemailer';
 
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
-  private readonly resend: Resend;
+  private readonly transporter: Transporter;
   private readonly fromEmail: string;
+  private readonly fromName: string;
   private readonly appName: string;
   private readonly frontendUrl: string;
 
   constructor(private configService: ConfigService) {
-    const apiKey = this.configService.get<string>('RESEND_API_KEY');
-    if (!apiKey) {
-      this.logger.warn(
-        'RESEND_API_KEY not found, email sending will be disabled',
-      );
-    }
-    this.resend = new Resend(apiKey);
-    this.fromEmail =
-      this.configService.get<string>('FROM_EMAIL') || 'noreply@pentateuch.com';
     this.appName = this.configService.get<string>('APP_NAME') || 'Pentateuch';
     this.frontendUrl =
       this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3000';
+    this.fromEmail = this.configService.getOrThrow<string>('EMAIL_USER');
+    this.fromName =
+      this.configService.get<string>('EMAIL_FROM_NAME') || this.appName;
 
-    // Log if using sandbox mode
-    if (this.fromEmail === 'onboarding@resend.dev') {
-      this.logger.warn(
-        'Using Resend sandbox mode. Emails can only be sent to your verified account email address.',
-      );
-    }
+    // Create Nodemailer transporter
+    this.transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: this.configService.get<string>('EMAIL_USER'),
+        pass: this.configService.get<string>('EMAIL_APP_PASSWORD'),
+      },
+    });
+
+    // Verify connection
+    this.verifyConnection();
   }
 
-  private getRecipientEmail(email: string): string {
-    // In development mode with sandbox, override recipient email
-    const nodeEnv = this.configService.get<string>('NODE_ENV');
-    const devEmailOverride =
-      this.configService.get<string>('DEV_EMAIL_OVERRIDE');
-
-    if (
-      nodeEnv === 'development' &&
-      devEmailOverride &&
-      this.fromEmail === 'onboarding@resend.dev'
-    ) {
+  private async verifyConnection(): Promise<void> {
+    try {
+      await this.transporter.verify();
+      this.logger.log('✅ Email service is ready to send emails');
+    } catch (error) {
+      this.logger.error('❌ Email service connection failed:', error.message);
       this.logger.warn(
-        `Development mode: Overriding recipient ${email} with ${devEmailOverride}`,
-      );
-      return devEmailOverride;
-    }
-
-    return email;
-  }
-
-  private handleResendError(
-    error: any,
-    email: string,
-    emailType: string,
-  ): void {
-    this.logger.error(
-      `Resend API error for ${emailType}: ${JSON.stringify(error)}`,
-    );
-
-    // Handle specific error cases
-    if (error?.error?.includes('domain is not verified')) {
-      this.logger.error(
-        `Domain verification required. Please verify your domain at https://resend.com/domains`,
-      );
-      throw new Error('Email domain not verified. Please contact support.');
-    }
-
-    if (error?.error?.includes('rate limit')) {
-      this.logger.error('Rate limit exceeded');
-      throw new Error(
-        'Email service temporarily unavailable. Please try again later.',
+        'Make sure EMAIL_USER and EMAIL_APP_PASSWORD are set correctly',
       );
     }
-
-    throw new Error(
-      `Failed to send ${emailType}: ${error?.message || 'Unknown error'}`,
-    );
   }
 
   async sendPasswordResetEmail(
@@ -88,39 +52,24 @@ export class EmailService {
   ): Promise<void> {
     try {
       const resetUrl = `${this.frontendUrl}/reset-password?token=${resetToken}`;
-
       const htmlContent = this.generatePasswordResetHtml(resetUrl);
       const textContent = this.generatePasswordResetText(resetUrl);
 
-      if (!this.resend) {
-        this.logger.warn(`Password reset email would be sent to: ${email}`);
-        this.logger.warn(`Reset URL: ${resetUrl}`);
-        return;
-      }
-
-      const recipientEmail = this.getRecipientEmail(email);
-
-      const { data, error } = await this.resend.emails.send({
-        from: `${this.appName} <${this.fromEmail}>`,
-        to: [recipientEmail],
+      await this.transporter.sendMail({
+        from: `"${this.fromName}" <${this.fromEmail}>`,
+        to: email,
         subject: `${this.appName} - Password Reset Request`,
         html: htmlContent,
         text: textContent,
       });
 
-      if (error) {
-        this.handleResendError(error, recipientEmail, 'password reset email');
-      }
-
-      this.logger.log(
-        `Password reset email sent successfully to ${recipientEmail} (original: ${email}). Message ID: ${data?.id}`,
-      );
+      this.logger.log(`✅ Password reset email sent to ${email}`);
     } catch (error) {
       this.logger.error(
-        `Failed to send password reset email to ${email}`,
-        error.stack,
+        `❌ Failed to send password reset email to ${email}:`,
+        error.message,
       );
-      throw error;
+      throw new Error('Failed to send password reset email');
     }
   }
 
@@ -134,39 +83,21 @@ export class EmailService {
       const textContent =
         this.generateEmailVerificationCodeText(verificationCode);
 
-      if (!this.resend) {
-        this.logger.warn(`Email verification code would be sent to: ${email}`);
-        this.logger.warn(`Verification code: ${verificationCode}`);
-        return;
-      }
-
-      const recipientEmail = this.getRecipientEmail(email);
-
-      const { data, error } = await this.resend.emails.send({
-        from: `${this.appName} <${this.fromEmail}>`,
-        to: [recipientEmail],
+      await this.transporter.sendMail({
+        from: `"${this.fromName}" <${this.fromEmail}>`,
+        to: email,
         subject: `${this.appName} - Your Verification Code`,
         html: htmlContent,
         text: textContent,
       });
 
-      if (error) {
-        this.handleResendError(
-          error,
-          recipientEmail,
-          'verification code email',
-        );
-      }
-
-      this.logger.log(
-        `Email verification code sent successfully to ${recipientEmail} (original: ${email}). Message ID: ${data?.id}`,
-      );
+      this.logger.log(`✅ Verification code sent to ${email}`);
     } catch (error) {
       this.logger.error(
-        `Failed to send verification code email to ${email}`,
-        error.stack,
+        `❌ Failed to send verification code to ${email}:`,
+        error.message,
       );
-      throw error;
+      throw new Error('Failed to send verification code');
     }
   }
 
@@ -175,35 +106,21 @@ export class EmailService {
       const htmlContent = this.generateWelcomeHtml(user);
       const textContent = this.generateWelcomeText(user);
 
-      if (!this.resend) {
-        this.logger.warn(`Welcome email would be sent to: ${user.email}`);
-        this.logger.warn(`User: ${user.firstName} ${user.lastName}`);
-        return;
-      }
-
-      const recipientEmail = this.getRecipientEmail(user.email);
-
-      const { data, error } = await this.resend.emails.send({
-        from: `${this.appName} <${this.fromEmail}>`,
-        to: [recipientEmail],
+      await this.transporter.sendMail({
+        from: `"${this.fromName}" <${this.fromEmail}>`,
+        to: user.email,
         subject: `🎉 Welcome to ${this.appName}! Start Sharing Your Faith`,
         html: htmlContent,
         text: textContent,
       });
 
-      if (error) {
-        this.handleResendError(error, recipientEmail, 'welcome email');
-      }
-
-      this.logger.log(
-        `Welcome email sent successfully to ${recipientEmail} (original: ${user.email}). Message ID: ${data?.id}`,
-      );
+      this.logger.log(`✅ Welcome email sent to ${user.email}`);
     } catch (error) {
       this.logger.error(
-        `Failed to send welcome email to ${user.email}`,
-        error.stack,
+        `❌ Failed to send welcome email to ${user.email}:`,
+        error.message,
       );
-      throw error;
+      throw new Error('Failed to send welcome email');
     }
   }
 

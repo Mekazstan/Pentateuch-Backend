@@ -113,23 +113,25 @@ model EmailSubscription {
 model EmailVerification {
   id               String    @id @default(cuid())
   email            String
-  verificationCode String
+  verificationCode String    @unique
   expiresAt        DateTime
   verifiedAt       DateTime?
   createdAt        DateTime  @default(now())
 
   @@index([email])
+  @@index([verificationCode])
   @@map("email_verifications")
 }
 
 model PasswordReset {
   id        String    @id @default(cuid())
   email     String
-  resetCode String
+  resetCode String    @unique
   expiresAt DateTime
   usedAt    DateTime?
   createdAt DateTime  @default(now())
 
   @@index([email])
+  @@index([resetCode])
   @@map("password_resets")
 }

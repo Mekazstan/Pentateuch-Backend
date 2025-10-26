@@ -55,9 +55,9 @@ export class AuthController {
 
   @Post('verify')
   @ApiOperation({
-    summary: 'Verify email with 4-digit code',
+    summary: 'Verify email with code',
     description:
-      'Verify user email address using the 4-digit verification code sent to email',
+      'Verify your email address using the 6-digit code sent to your email',
   })
   @ApiResponse({
     status: HttpStatus.OK,
@@ -66,9 +66,6 @@ export class AuthController {
   })
   @ApiBadRequestResponse({
     description: 'Invalid or expired verification code',
-  })
-  @ApiNotFoundResponse({
-    description: 'User not found',
   })
   @ApiInternalServerErrorResponse({
     description: 'Failed to verify email',
@@ -177,7 +174,8 @@ export class AuthController {
   @Post('reset-password')
   @ApiOperation({
     summary: 'Reset password with code',
-    description: 'Reset user password using the 6-digit reset code',
+    description:
+      'Reset your password using the 6-digit code sent to your email',
   })
   @ApiResponse({
     status: HttpStatus.OK,
@@ -186,9 +184,6 @@ export class AuthController {
   })
   @ApiBadRequestResponse({
     description: 'Invalid or expired reset code',
-  })
-  @ApiNotFoundResponse({
-    description: 'User not found',
   })
   @ApiInternalServerErrorResponse({
     description: 'Failed to reset password',

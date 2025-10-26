@@ -5,6 +5,8 @@ import {
   IsString,
   MinLength,
   IsOptional,
+  Length,
+  Matches,
 } from 'class-validator';
 
 export class RegisterDto {
@@ -46,19 +48,14 @@ export class RegisterDto {
 
 export class VerifyEmailDto {
   @ApiProperty({
-    description: 'User email address',
-    example: 'dave.mike@example.com',
-  })
-  @IsEmail()
-  @IsNotEmpty()
-  email: string;
-
-  @ApiProperty({
-    description: '4-digit verification code',
-    example: '1234',
+    description: '6-digit verification code sent to your email',
+    example: '123456',
+    minLength: 6,
+    maxLength: 6,
   })
   @IsString()
   @IsNotEmpty()
+  @Length(6, 6)
   verificationCode: string;
 }
 
@@ -122,19 +119,14 @@ export class ForgotPasswordDto {
 
 export class ResetPasswordDto {
   @ApiProperty({
-    description: 'User email address',
-    example: 'dave.mike@example.com',
-  })
-  @IsEmail()
-  @IsNotEmpty()
-  email: string;
-
-  @ApiProperty({
-    description: '6-digit password reset code',
+    description: '6-digit password reset code sent to your email',
     example: '123456',
+    minLength: 6,
+    maxLength: 6,
   })
   @IsString()
   @IsNotEmpty()
+  @Length(6, 6)
   resetCode: string;
 
   @ApiProperty({
@@ -144,6 +136,9 @@ export class ResetPasswordDto {
   })
   @IsString()
   @MinLength(8)
+  @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/, {
+    message: 'Password must contain uppercase, lowercase, and number',
+  })
   password: string;
 }
 
