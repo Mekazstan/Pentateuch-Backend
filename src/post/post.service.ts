@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 import {
   Injectable,
@@ -19,7 +20,6 @@ import {
   TagsResponseDto,
   SimplePostResponseDto,
 } from './dto/post.dto';
-import { Multer } from 'multer';
 import { FileUploadService } from 'src/upload/upload.service';
 import { Prisma } from '@prisma/client';
 
@@ -35,26 +35,21 @@ export class PostsService {
   async createPost(
     createPostDto: CreatePostDto,
     userId: string,
-    file?: Multer.File,
   ): Promise<PostCreatedResponseDto> {
     try {
       // Generate slug from title
       const slug = this.generateSlug(createPostDto.title);
       const uniqueSlug = await this.ensureUniqueSlug(slug);
 
-      let featuredImageUrl = createPostDto.featuredImageFile;
-
-      // Handle file upload if provided
-      if (file) {
-        featuredImageUrl = await this.uploadImage(file, userId);
-      }
+      // Sanitize HTML content (remove full document tags if present)
+      const sanitizedContent = this.sanitizeHtmlContent(createPostDto.content);
 
       const post = await this.prisma.post.create({
         data: {
           title: createPostDto.title,
-          content: createPostDto.content,
+          content: sanitizedContent,
           slug: uniqueSlug,
-          featuredImage: featuredImageUrl,
+          featuredImage: createPostDto.featuredImage,
           authorId: userId,
           allowComments: createPostDto.allowComments ?? true,
           tags: createPostDto.tags || [],
@@ -333,12 +328,12 @@ export class PostsService {
                 comments: true,
               },
             },
-            ...(userId && {
-              likes: {
-                where: { userId },
-                select: { id: true },
-              },
-            }),
+            likes: userId
+              ? {
+                  where: { userId },
+                  select: { id: true },
+                }
+              : false,
           },
         }),
         this.prisma.post.count({ where }),
@@ -423,7 +418,6 @@ export class PostsService {
     postId: string,
     updatePostDto: UpdatePostDto,
     userId: string,
-    file?: Multer.File,
   ): Promise<PostCreatedResponseDto> {
     try {
       // Check if post exists and belongs to user
@@ -447,32 +441,47 @@ export class PostsService {
       }
 
       // Prepare update data
-      const updateData: any = { ...updatePostDto };
+      const updateData: any = {};
 
       // Handle slug update if title is being changed
       if (updatePostDto.title && updatePostDto.title !== existingPost.title) {
+        updateData.title = updatePostDto.title;
         const newSlug = this.generateSlug(updatePostDto.title);
         updateData.slug = await this.ensureUniqueSlug(newSlug, postId);
       }
 
-      // Handle image upload
-      if (file) {
-        const newImageUrl = await this.uploadImage(file, userId);
-        updateData.featuredImage = newImageUrl;
+      // Update content if provided
+      if (updatePostDto.content) {
+        updateData.content = this.sanitizeHtmlContent(updatePostDto.content);
+      }
 
-        // Delete old image if exists
-        if (existingPost.featuredImage) {
+      // Update featured image if provided
+      if (updatePostDto.featuredImage) {
+        // Delete old image if exists and is different
+        if (
+          existingPost.featuredImage &&
+          existingPost.featuredImage !== updatePostDto.featuredImage
+        ) {
           await this.deleteImage(existingPost.featuredImage);
         }
+        updateData.featuredImage = updatePostDto.featuredImage;
+      }
+
+      // Update other fields
+      if (updatePostDto.allowComments !== undefined) {
+        updateData.allowComments = updatePostDto.allowComments;
+      }
+
+      if (updatePostDto.tags) {
+        updateData.tags = updatePostDto.tags;
       }
 
       // Handle publication status change
       if (updatePostDto.published !== undefined) {
+        updateData.published = updatePostDto.published;
         if (updatePostDto.published && !existingPost.published) {
-          // Publishing for the first time
           updateData.publishedAt = new Date();
         } else if (!updatePostDto.published && existingPost.published) {
-          // Unpublishing
           updateData.publishedAt = null;
         }
       }
@@ -623,11 +632,14 @@ export class PostsService {
         COALESCE(COUNT(DISTINCT l.id), 0)::int as "likesCount",
         COALESCE(COUNT(DISTINCT c.id), 0)::int as "commentsCount",
         (COALESCE(COUNT(DISTINCT l.id), 0) * 2 + COALESCE(COUNT(DISTINCT c.id), 0)) as engagement_score,
-        EXISTS(
-          SELECT 1 FROM likes 
-          WHERE likes."postId" = p.id 
-          AND likes."userId" = ${userId || null}
-        ) as "isLiked"
+        CASE 
+          WHEN ${userId || null} IS NULL THEN false
+          ELSE EXISTS(
+            SELECT 1 FROM likes 
+            WHERE likes."postId" = p.id 
+            AND likes."userId" = ${userId || null}
+          )
+        END as "isLiked"
       FROM posts p
       INNER JOIN users u ON u.id = p."authorId"
       LEFT JOIN likes l ON l."postId" = p.id
@@ -693,36 +705,6 @@ export class PostsService {
     return slug;
   }
 
-  private async uploadImage(
-    file: Multer.File,
-    userId: string,
-  ): Promise<string> {
-    try {
-      // Define folder structure for organization
-      const folder = `posts/${userId}`;
-
-      // Upload options
-      const options = {
-        allowedFormats: ['jpg', 'jpeg', 'png', 'webp', 'gif'],
-        maxFileSize: 10 * 1024 * 1024,
-        transformation: [
-          {
-            width: 1200,
-            height: 630,
-            crop: 'limit',
-            quality: 'auto:good',
-            fetch_format: 'auto',
-          },
-        ],
-      };
-
-      return await this.fileUploadService.uploadFile(file, folder, options);
-    } catch (error) {
-      this.logger.error('Image upload error:', error);
-      throw new BadRequestException('Failed to upload image');
-    }
-  }
-
   private async deleteImage(imageUrl: string): Promise<void> {
     try {
       const publicId = this.extractPublicIdFromUrl(imageUrl);
@@ -730,7 +712,6 @@ export class PostsService {
         await this.fileUploadService.deleteFile(publicId);
       }
     } catch (error) {
-      // Log but don't throw - image deletion failure shouldn't block operations
       this.logger.warn('Failed to delete image:', error);
     }
   }
@@ -748,6 +729,11 @@ export class PostsService {
 
   // Update formatPostResponse to include featuredImage
   private formatPostResponse(post: any, userId?: string): PostResponseDto {
+    let isLiked = false;
+
+    if (userId && post.likes) {
+      isLiked = post.likes.length > 0;
+    }
     return {
       id: post.id,
       title: post.title,
@@ -768,7 +754,7 @@ export class PostsService {
       updatedAt: post.updatedAt,
       likesCount: post._count?.likes || 0,
       commentsCount: post._count?.comments || 0,
-      isLiked: userId ? post.likes?.length > 0 || false : undefined,
+      isLiked,
     };
   }
 
@@ -791,7 +777,30 @@ export class PostsService {
       updatedAt: new Date(post.updatedAt),
       likesCount: post.likesCount,
       commentsCount: post.commentsCount,
-      isLiked: userId ? post.isLiked : undefined,
+      isLiked: Boolean(post.isLiked),
     };
+  }
+
+  private sanitizeHtmlContent(content: string): string {
+    let sanitized = content;
+
+    // Remove DOCTYPE
+    sanitized = sanitized.replace(/<!DOCTYPE[^>]*>/gi, '');
+
+    // Extract body content if full HTML document
+    const bodyMatch = sanitized.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+    if (bodyMatch) {
+      sanitized = bodyMatch[1];
+    }
+
+    // Remove html and head tags
+    sanitized = sanitized.replace(/<\/?html[^>]*>/gi, '');
+    sanitized = sanitized.replace(/<head[^>]*>[\s\S]*?<\/head>/gi, '');
+    sanitized = sanitized.replace(/<\/?body[^>]*>/gi, '');
+
+    // Trim whitespace
+    sanitized = sanitized.trim();
+
+    return sanitized;
   }
 }

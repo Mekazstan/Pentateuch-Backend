@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { EmailModule } from './email/email.module';
@@ -14,9 +14,12 @@ import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { FileUploadService } from './upload/upload.service';
 import { UploadModule } from './upload/upload.module';
+import { json, urlencoded } from 'express';
 @Module({
   imports: [
-    ConfigModule.forRoot(),
+    ConfigModule.forRoot({
+      isGlobal: true,
+    }),
     ThrottlerModule.forRoot([
       {
         name: 'short',
@@ -42,4 +45,14 @@ import { UploadModule } from './upload/upload.module';
   controllers: [AppController],
   providers: [AppService, PrismaService, FileUploadService],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    // Platform-agnostic way to increase payload size
+    consumer
+      .apply(
+        json({ limit: '10mb' }),
+        urlencoded({ limit: '10mb', extended: true }),
+      )
+      .forRoutes('*');
+  }
+}

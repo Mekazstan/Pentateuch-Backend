@@ -99,7 +99,7 @@ export class PostSummaryDto {
     description: 'Whether the current user has liked this post',
     example: true,
   })
-  isLiked?: boolean;
+  isLiked: boolean;
 }
 
 export class ExploreResponseDto {

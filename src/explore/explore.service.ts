@@ -138,7 +138,7 @@ export class ExploreService {
           likesCount: post.likesCount,
           commentsCount: post.commentsCount,
         },
-        isLiked: userId ? post.isLiked : undefined,
+        isLiked: Boolean(post.isLiked),
       }));
 
       // Fetch available tags from user-created posts

@@ -9,6 +9,8 @@ import {
   MaxLength,
   MinLength,
   IsNumber,
+  IsUrl,
+  IsNotEmpty,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 
@@ -39,19 +41,21 @@ export class CreatePostDto {
   title: string;
 
   @ApiProperty({
-    description: 'Post content in HTML format',
-    example: '<p>I thought I was alone...</p><p>Until I met You.</p>',
+    description:
+      'Post content - HTML body only (no <html>, <head>, or <body> tags)',
+    example: '<h1>Title</h1><p>I thought I was alone...</p>',
   })
   @IsString()
   content: string;
 
   @ApiPropertyOptional({
-    description: 'Featured image URL',
-    example: 'https://example.com/image.jpg',
+    description: 'Featured image URL (from /posts/image endpoint)',
+    example: 'https://res.cloudinary.com/your-cloud/image/upload/...',
   })
   @IsOptional()
   @IsString()
-  featuredImageFile?: string;
+  @IsUrl()
+  featuredImage?: string;
 
   @ApiPropertyOptional({
     description: 'Allow comments on this post',
@@ -102,11 +106,13 @@ export class UpdatePostDto {
   content?: string;
 
   @ApiPropertyOptional({
-    description: 'Featured image URL',
+    description: 'Featured image URL (from /posts/image endpoint)',
+    example: 'https://res.cloudinary.com/your-cloud/image/upload/...',
   })
   @IsOptional()
   @IsString()
-  featuredImageFile?: string;
+  @IsUrl()
+  featuredImage?: string;
 
   @ApiPropertyOptional({
     description: 'Allow comments on this post',
@@ -130,6 +136,16 @@ export class UpdatePostDto {
   @IsOptional()
   @IsBoolean()
   published?: boolean;
+}
+
+export class UploadImageDto {
+  @ApiProperty({
+    description: 'Base64 encoded image string',
+    example: 'data:image/jpeg;base64,/9j/4AAQSkZJRg...',
+  })
+  @IsString()
+  @IsNotEmpty()
+  image: string;
 }
 
 export class GetPostsDto {
@@ -255,7 +271,7 @@ export class PostResponseDto {
       'Whether the current user has liked this post (only for authenticated users)',
     example: true,
   })
-  isLiked?: boolean;
+  isLiked: boolean;
 }
 
 export class PaginationDto {

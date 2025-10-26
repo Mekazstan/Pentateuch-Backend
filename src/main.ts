@@ -5,7 +5,10 @@ import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, {
+    bodyParser: true,
+    rawBody: true,
+  });
 
   app.enableCors({
     origin: true,
@@ -46,7 +49,6 @@ async function bootstrap() {
       },
       'refresh-token',
     )
-    // Use dynamic server URL instead of hardcoded localhost
     .addServer(serverUrl, serverName)
     .build();
 

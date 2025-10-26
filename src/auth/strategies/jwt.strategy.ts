@@ -35,6 +35,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         id: true,
         email: true,
         fullName: true,
+        role: true,
         isVerified: true,
         avatar: true,
         bio: true,
@@ -49,9 +50,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     // Return user data for request context
     return {
       id: user.id,
-      userId: user.id, // For compatibility
+      userId: user.id,
       email: user.email,
       fullName: user.fullName,
+      role: user.role,
       isVerified: user.isVerified,
       avatar: user.avatar,
       bio: user.bio,

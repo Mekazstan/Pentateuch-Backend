@@ -11,8 +11,6 @@ import {
   Request,
   HttpStatus,
   Patch,
-  UseInterceptors,
-  UploadedFile,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -26,6 +24,7 @@ import {
   ApiUnauthorizedResponse,
   ApiForbiddenResponse,
   ApiInternalServerErrorResponse,
+  ApiConsumes,
 } from '@nestjs/swagger';
 import { PostsService } from './post.service';
 import {
@@ -37,19 +36,22 @@ import {
   PostCreatedResponseDto,
   TagsResponseDto,
   SimplePostResponseDto,
+  UploadImageDto,
 } from './dto/post.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-auth.guard';
 import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { Multer } from 'multer';
 import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import { AdminGuard } from 'src/auth/guards/admin.guard';
+import { FileUploadService } from 'src/upload/upload.service';
 
 @ApiTags('Posts')
 @Controller('posts')
 export class PostsController {
-  constructor(private readonly postsService: PostsService) {}
+  constructor(
+    private readonly postsService: PostsService,
+    private readonly fileUploadService: FileUploadService,
+  ) {}
 
   @Get()
   @UseGuards(OptionalJwtAuthGuard)
@@ -217,10 +219,10 @@ export class PostsController {
   @Post()
   @UseGuards(JwtAuthGuard, AdminGuard)
   @ApiBearerAuth('access-token')
-  @UseInterceptors(FileInterceptor('image'))
   @ApiOperation({
-    summary: 'Create new post',
-    description: 'Create a new post (requires authentication)',
+    summary: 'Create new post (Admin only)',
+    description:
+      'Create a new post with HTML content. Upload image first using /posts/image',
   })
   @ApiResponse({
     status: HttpStatus.CREATED,
@@ -242,11 +244,52 @@ export class PostsController {
   @Throttle({ short: { limit: 5, ttl: 3600000 } })
   async createPost(
     @Body() createPostDto: CreatePostDto,
-    @UploadedFile() file: Multer.File,
     @CurrentUser() user: any,
   ): Promise<PostCreatedResponseDto> {
     const userId = user.id;
-    return this.postsService.createPost(createPostDto, userId, file);
+    return this.postsService.createPost(createPostDto, userId);
+  }
+
+  @Post('image')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Upload image (Admin only)',
+    description: 'Upload a single image and get the URL',
+  })
+  @ApiConsumes('application/json')
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Image uploaded successfully',
+    schema: {
+      properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string', example: 'Image uploaded successfully' },
+        url: {
+          type: 'string',
+          example: 'https://res.cloudinary.com/...',
+        },
+      },
+    },
+  })
+  @ApiBadRequestResponse({
+    description: 'Invalid image or image is required',
+  })
+  @Throttle({ short: { limit: 10, ttl: 3600000 } })
+  async uploadImage(
+    @Body() uploadImageDto: UploadImageDto,
+    @CurrentUser() user: any,
+  ) {
+    const imageUrl = await this.fileUploadService.uploadBase64(
+      uploadImageDto.image,
+      `posts/${user.id}`,
+    );
+
+    return {
+      success: true,
+      message: 'Image uploaded successfully',
+      url: imageUrl,
+    };
   }
 
   @Patch(':id')
@@ -254,7 +297,8 @@ export class PostsController {
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Update post (Admin only)',
-    description: 'Update an existing post - requires admin role',
+    description:
+      'Update an existing post. Upload new image first using /posts/image if needed',
   })
   @ApiParam({
     name: 'id',
@@ -270,7 +314,7 @@ export class PostsController {
     description: 'Authentication required',
   })
   @ApiForbiddenResponse({
-    description: 'You can only edit your own posts',
+    description: 'Admin access required',
   })
   @ApiNotFoundResponse({
     description: 'Post not found',
@@ -282,15 +326,13 @@ export class PostsController {
     description: 'Failed to update post',
   })
   @Throttle({ short: { limit: 10, ttl: 3600000 } })
-  @UseInterceptors(FileInterceptor('image'))
   async updatePost(
     @Param('id') postId: string,
     @Body() updatePostDto: UpdatePostDto,
-    @UploadedFile() file: Multer.File,
     @CurrentUser() user: any,
   ): Promise<PostCreatedResponseDto> {
     const userId = user.id;
-    return this.postsService.updatePost(postId, updatePostDto, userId, file);
+    return this.postsService.updatePost(postId, updatePostDto, userId);
   }
 
   @Delete(':id')

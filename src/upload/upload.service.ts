@@ -140,6 +140,7 @@ export class FileUploadService {
   async deleteFile(publicId: string): Promise<boolean> {
     try {
       const result = await cloudinary.uploader.destroy(publicId);
+      this.logger.log(`Image deleted: ${publicId}`);
       return result.result === 'ok';
     } catch (error) {
       this.logger.error('File deletion error:', error);
@@ -275,5 +276,44 @@ export class FileUploadService {
       signature,
       timestamp,
     };
+  }
+
+  /**
+   * Upload base64 image to Cloudinary
+   */
+  async uploadBase64(base64String: string, folder: string): Promise<string> {
+    try {
+      // Validate base64 format
+      if (!base64String.startsWith('data:image/')) {
+        throw new BadRequestException(
+          'Invalid image format. Must be base64 encoded image.',
+        );
+      }
+
+      const uploadOptions = {
+        folder,
+        allowed_formats: ['jpg', 'jpeg', 'png', 'webp', 'gif'],
+        transformation: [
+          {
+            width: 1200,
+            height: 630,
+            crop: 'limit',
+            quality: 'auto:good',
+            fetch_format: 'auto',
+          },
+        ],
+      };
+
+      const result = await cloudinary.uploader.upload(
+        base64String,
+        uploadOptions,
+      );
+
+      this.logger.log(`Base64 image uploaded: ${result.public_id}`);
+      return result.secure_url;
+    } catch (error) {
+      this.logger.error('Base64 upload error:', error);
+      throw new BadRequestException(error.message || 'Failed to upload image');
+    }
   }
 }
