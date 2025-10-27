@@ -44,6 +44,7 @@
     "@nestjs/swagger": "^11.2.0",
     "@nestjs/throttler": "^6.4.0",
     "@prisma/client": "^6.16.2",
+    "@sendgrid/mail": "^8.1.6",
     "axios": "^1.12.2",
     "bcrypt": "^6.0.0",
     "class-sanitizer": "^1.0.1",

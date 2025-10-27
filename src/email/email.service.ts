@@ -1,13 +1,11 @@
 /* eslint-disable @typescript-eslint/no-floating-promises */
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as nodemailer from 'nodemailer';
-import { Transporter } from 'nodemailer';
+import * as sgMail from '@sendgrid/mail';
 
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
-  private readonly transporter: Transporter;
   private readonly fromEmail: string;
   private readonly fromName: string;
   private readonly appName: string;
@@ -17,35 +15,16 @@ export class EmailService {
     this.appName = this.configService.get<string>('APP_NAME') || 'Pentateuch';
     this.frontendUrl =
       this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3000';
-    this.fromEmail = this.configService.getOrThrow<string>('EMAIL_USER');
+    this.fromEmail = this.configService.getOrThrow<string>('EMAIL_FROM');
     this.fromName =
       this.configService.get<string>('EMAIL_FROM_NAME') || this.appName;
 
-    // Create Nodemailer transporter
-    this.transporter = nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 2525,
-      secure: false,
-      auth: {
-        user: this.configService.get<string>('EMAIL_USER'),
-        pass: this.configService.get<string>('EMAIL_APP_PASSWORD'),
-      },
-    });
+    // Initialize SendGrid
+    const apiKey = this.configService.getOrThrow<string>('SENDGRID_API_KEY');
+    sgMail.setApiKey(apiKey);
 
-    // Verify connection
-    this.verifyConnection();
-  }
-
-  private async verifyConnection(): Promise<void> {
-    try {
-      await this.transporter.verify();
-      this.logger.log('✅ Email service is ready to send emails');
-    } catch (error) {
-      this.logger.error('❌ Email service connection failed:', error.message);
-      this.logger.warn(
-        'Make sure EMAIL_USER and EMAIL_APP_PASSWORD are set correctly',
-      );
-    }
+    this.logger.log('✅ SendGrid API initialized');
+    this.logger.log(`From Email: ${this.fromEmail}`);
   }
 
   async sendPasswordResetEmail(
@@ -57,19 +36,23 @@ export class EmailService {
       const htmlContent = this.generatePasswordResetHtml(resetUrl);
       const textContent = this.generatePasswordResetText(resetUrl);
 
-      await this.transporter.sendMail({
-        from: `"${this.fromName}" <${this.fromEmail}>`,
+      const msg = {
         to: email,
+        from: {
+          email: this.fromEmail,
+          name: this.fromName,
+        },
         subject: `${this.appName} - Password Reset Request`,
         html: htmlContent,
         text: textContent,
-      });
+      };
 
+      await sgMail.send(msg);
       this.logger.log(`✅ Password reset email sent to ${email}`);
     } catch (error) {
       this.logger.error(
         `❌ Failed to send password reset email to ${email}:`,
-        error.message,
+        error.response?.body || error.message,
       );
       throw new Error('Failed to send password reset email');
     }
@@ -85,19 +68,23 @@ export class EmailService {
       const textContent =
         this.generateEmailVerificationCodeText(verificationCode);
 
-      await this.transporter.sendMail({
-        from: `"${this.fromName}" <${this.fromEmail}>`,
+      const msg = {
         to: email,
+        from: {
+          email: this.fromEmail,
+          name: this.fromName,
+        },
         subject: `${this.appName} - Your Verification Code`,
         html: htmlContent,
         text: textContent,
-      });
+      };
 
+      await sgMail.send(msg);
       this.logger.log(`✅ Verification code sent to ${email}`);
     } catch (error) {
       this.logger.error(
         `❌ Failed to send verification code to ${email}:`,
-        error.message,
+        error.response?.body || error.message,
       );
       throw new Error('Failed to send verification code');
     }
@@ -108,19 +95,23 @@ export class EmailService {
       const htmlContent = this.generateWelcomeHtml(user);
       const textContent = this.generateWelcomeText(user);
 
-      await this.transporter.sendMail({
-        from: `"${this.fromName}" <${this.fromEmail}>`,
+      const msg = {
         to: user.email,
+        from: {
+          email: this.fromEmail,
+          name: this.fromName,
+        },
         subject: `🎉 Welcome to ${this.appName}! Start Sharing Your Faith`,
         html: htmlContent,
         text: textContent,
-      });
+      };
 
+      await sgMail.send(msg);
       this.logger.log(`✅ Welcome email sent to ${user.email}`);
     } catch (error) {
       this.logger.error(
         `❌ Failed to send welcome email to ${user.email}:`,
-        error.message,
+        error.response?.body || error.message,
       );
       throw new Error('Failed to send welcome email');
     }
